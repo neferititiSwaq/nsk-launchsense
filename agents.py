@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import re  # Added for text cleaning
 from google.genai import Client
 from google.genai import types
 from dotenv import load_dotenv
@@ -18,6 +19,22 @@ else:
     client = Client(api_key=api_key)
 
 
+def clean_json_response(text):
+    """
+    Strips away any markdown backticks or conversational text 
+    to extract only the JSON array or object.
+    """
+    try:
+        # Find the first '[' or '{' and the last ']' or '}'
+        start_idx = re.search(r'[\[\{]', text).start()
+        end_idx = text.rfind(text[start_idx].replace(
+            '[', ']').replace('{', '}')) + 1
+        return text[start_idx:end_idx]
+    except:
+        # Fallback: just strip common markdown tags
+        return text.replace("```json", "").replace("```", "").strip()
+
+
 class PersonaAgent:
     def __init__(self, brand_name="NSKdevpreneur Hub"):
         self.brand = brand_name
@@ -26,18 +43,25 @@ class PersonaAgent:
         if not client:
             return "No Client"
 
-        print(
-            f"🚀 Sending prompt to Gemini (gemini-2.0-flash) for: {product_brief}")
+        print(f"🚀 Sending prompt to Gemini for: {product_brief}")
+
+        # LAYER 1: Stricter Prompting
+        prompt = f"""
+        GENERATE ONLY A VALID JSON ARRAY. NO CONVERSATION. NO PREAMBLE.
+        Product: {product_brief}
+        Return exactly 3 buyer personas as a JSON array. 
+        Each object must have these keys: "name", "occupation", "goals", "pain_points", "quote".
+        """
 
         try:
-            # We are using 'gemini-2.5-flash' - it's faster and newer!
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=f"Generate 3 buyer personas for {product_brief} as a JSON array."
+                contents=prompt
             )
-
             print("📩 Response received!")
-            return response.text
+
+            # LAYER 2: Defensive Cleaning
+            return clean_json_response(response.text)
         except Exception as e:
             print(f"❌ API ERROR: {e}")
             return None
@@ -49,7 +73,6 @@ class CompetitorAgent:
         self.search_key = os.getenv("SERPER_API_KEY")
 
     def search_market(self, query):
-        """This function actually 'Googles' the product for real prices"""
         url = "https://google.serper.dev/search"
         payload = json.dumps({"q": f"{query} price South Africa shop"})
         headers = {
@@ -60,24 +83,28 @@ class CompetitorAgent:
         return response.json()
 
     def research_competitors(self, product_brief):
-        # 1. Get real web data first
         web_data = self.search_market(product_brief)
         snippets = [item.get('snippet', '')
                     for item in web_data.get('organic', [])[:3]]
         context = " ".join(snippets)
 
-        # 2. Feed that real data to Gemini to analyze
         prompt = f"""
         Web Research Data: {context}
         Product: {product_brief}
-        Based on the web research above, identify 3 real competitors.
+        Based on the data, identify 3 real competitors. 
         Return ONLY a JSON array with keys: "name", "price_range", "strengths", "link".
         """
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', contents=prompt)
-        clean_json = response.text.replace(
-            "```json", "").replace("```", "").strip()
-        return json.loads(clean_json)
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            # Apply cleaning here too!
+            cleaned = clean_json_response(response.text)
+            return json.loads(cleaned)
+        except Exception as e:
+            print(f"❌ Competitor Error: {e}")
+            return []
 
 
 class PricingAgent:
@@ -86,13 +113,13 @@ class PricingAgent:
 
     def calculate_strategy(self, cost_price, target_margin, product_brief):
         try:
-            # Simple math logic
             markup = cost_price / (1 - target_margin)
+            prompt = f"Product: {product_brief}. Cost: R{cost_price}. Suggested Retail: R{markup}. Provide 3 psychological pricing tips for this specific product in the South African market."
 
-            # AI logic to justify the price
-            prompt = f"Product: {product_brief}. Cost: R{cost_price}. Suggested Retail: R{markup}. Provide 3 psychological pricing tips for this specific product."
             response = client.models.generate_content(
-                model='gemini-2.5-flash', contents=prompt)
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
 
             return {
                 "suggested_price": round(markup, 2),
@@ -104,13 +131,11 @@ class PricingAgent:
 
 class ImageAgent:
     def __init__(self):
-        # Ensure 'client' is the one you initialized with your API key
         self.client = client
 
     def generate_sketch(self, product_brief):
         try:
             print(f"🎨 Nano Banana 2 is sketching: {product_brief}")
-            # 2026 Standard Syntax
             response = self.client.models.generate_content(
                 model='gemini-3.1-flash-image-preview',
                 contents=[
@@ -119,19 +144,10 @@ class ImageAgent:
                     response_modalities=["IMAGE"]
                 )
             )
-            # Find the image part in the response
             for part in response.parts:
                 if part.inline_data:
-                    return part.as_image()  # Returns a PIL Image
+                    return part.as_image()
             return None
         except Exception as e:
             print(f"❌ Image Error: {e}")
             return None
-
-
-if __name__ == "__main__":
-    print("--- STARTING AGENT TEST ---")
-    agent = PersonaAgent()
-    result = agent.create_personas("Premium streetwear hoodies")
-    print("\n--- FINAL RESULT ---")
-    print(result)
