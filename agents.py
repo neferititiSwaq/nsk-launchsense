@@ -1,22 +1,25 @@
 import requests
 import os
 import json
-import re  # Added for text cleaning
+import re
 from google.genai import Client
 from google.genai import types
 from dotenv import load_dotenv
 
-# 1. Load the Secret key
+# 1. Load Local Secrets (for MacBook development)
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
 
-# 2. Initialize the New Gemini Client
+# 2. Smart Key Selection (Checks BOTH names to be safe)
+api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+# 3. Initialize Global Client
 if not api_key:
-    print("❌ ERROR: No API Key found in .env!")
+    print("❌ ERROR: No API Key found in Environment or Secrets!")
     client = None
 else:
-    print(f"✅ Key found: {api_key[:5]}...")
+    # Use the new 2026 SDK syntax
     client = Client(api_key=api_key)
+    print("✅ Gemini Client successfully initialized.")
 
 
 def clean_json_response(text):
