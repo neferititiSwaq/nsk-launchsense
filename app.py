@@ -2,6 +2,7 @@ import streamlit as st
 from fpdf import FPDF
 import pandas as pd
 import json
+import re  # New addition for smart cleaning
 from agents import PersonaAgent, CompetitorAgent, PricingAgent, ImageAgent
 
 # 1. Page Configuration
@@ -48,20 +49,30 @@ if st.button("🚀 Run Full Launch Analysis"):
             price_strat = pr_agent.calculate_strategy(
                 cost_price, target_margin, product_brief)
 
-            # Store results in Session State with error handling for JSON
+            # --- SMART JSON EXTRACTION ---
             try:
+                # Regex finds anything between [ and ] inclusive
+                match = re.search(r'\[\s*\{.*\}\s*\]', raw_p, re.DOTALL)
+                if match:
+                    clean_p = match.group(0)
+                else:
+                    clean_p = raw_p  # Fallback
+
+                personas_list = json.loads(clean_p)
+
                 st.session_state.analysis_data = {
-                    "personas": json.loads(raw_p),
+                    "personas": personas_list,
                     "competitors": comps,
                     "pricing": price_strat,
                     "brief": product_brief
                 }
-                # Reset image for new analysis
                 st.session_state.product_img = None
+                st.success("Analysis Complete!")
             except Exception as e:
                 st.error(
-                    "AI returned a complex format. Please try running the analysis again.")
-                st.expander("Debug Details").write(raw_p)
+                    "AI sent a complex format. Check the 'Debug Details' below.")
+                with st.expander("🔍 Debug Details (Raw AI Output)"):
+                    st.code(raw_p)
     else:
         st.warning("Please describe your product first.")
 
@@ -69,7 +80,6 @@ if st.button("🚀 Run Full Launch Analysis"):
 if st.session_state.analysis_data:
     data = st.session_state.analysis_data
 
-    # ROW 1: Image and Personas
     col_img, col_per = st.columns([1, 2])
 
     with col_img:
@@ -96,7 +106,6 @@ if st.session_state.analysis_data:
 
     st.markdown("---")
 
-    # ROW 2: Competitors and Pricing
     col_comp, col_price = st.columns(2)
 
     with col_comp:
@@ -118,7 +127,6 @@ if st.session_state.analysis_data:
         pdf.cell(200, 20, txt="NSK LaunchSense: Strategic Report",
                  ln=True, align='C')
 
-        # Financials
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="1. Financial Summary", ln=True)
         pdf.set_font("Arial", '', 12)
@@ -126,7 +134,6 @@ if st.session_state.analysis_data:
         pdf.cell(
             200, 10, txt=f"Unit Cost: R{cost_price} | Retail: R{strat['suggested_price']}", ln=True)
 
-        # Personas
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="2. Target Personas", ln=True)
@@ -136,7 +143,6 @@ if st.session_state.analysis_data:
             quote = p.get('quote', p.get('goals', 'Ready for adventure'))
             pdf.multi_cell(0, 10, txt=f"- {name}: {quote[:100]}...")
 
-        # Competitors
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="3. Competitor Landscape", ln=True)
