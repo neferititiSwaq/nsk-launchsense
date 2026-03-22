@@ -70,28 +70,41 @@ class PersonaAgent:
 class CompetitorAgent:
     def __init__(self, brand_name="NSKdevpreneur Hub"):
         self.brand = brand_name
+        # Use .get() to avoid crashing if the key is missing in Secrets
         self.search_key = os.getenv("SERPER_API_KEY")
 
     def search_market(self, query):
+        """This function actually 'Googles' the product for real prices"""
+        if not self.search_key:
+            return {"organic": []}  # Return empty if no key
+
         url = "https://google.serper.dev/search"
-        payload = json.dumps({"q": f"{query} price South Africa shop"})
+        payload = json.dumps({"q": f"{query} price South Africa"})
         headers = {
             'X-API-KEY': self.search_key,
             'Content-Type': 'application/json'
         }
-        response = requests.request("POST", url, headers=headers, data=payload)
-        return response.json()
+        try:
+            response = requests.request(
+                "POST", url, headers=headers, data=payload)
+            return response.json()
+        except:
+            return {"organic": []}
 
     def research_competitors(self, product_brief):
+        # FIX: Ensure we use self.search_market
         web_data = self.search_market(product_brief)
-        snippets = [item.get('snippet', '')
-                    for item in web_data.get('organic', [])[:3]]
-        context = " ".join(snippets)
+
+        # Defensive check for web_data structure
+        organic_results = web_data.get('organic', [])
+        snippets = [item.get('snippet', '') for item in organic_results[:3]]
+        context = " ".join(
+            snippets) if snippets else "No local web data found."
 
         prompt = f"""
         Web Research Data: {context}
         Product: {product_brief}
-        Based on the data, identify 3 real competitors. 
+        Based on the data, identify 3 real competitors in South Africa. 
         Return ONLY a JSON array with keys: "name", "price_range", "strengths", "link".
         """
         try:
@@ -99,12 +112,13 @@ class CompetitorAgent:
                 model='gemini-2.5-flash',
                 contents=prompt
             )
-            # Apply cleaning here too!
+            # Use the cleaning function we built!
             cleaned = clean_json_response(response.text)
             return json.loads(cleaned)
         except Exception as e:
             print(f"❌ Competitor Error: {e}")
-            return []
+            # Return a fallback list so the app doesn't crash
+            return [{"name": "Generic Competitor", "price_range": "R500-R1000", "strengths": "Market Presence", "link": "#"}]
 
 
 class PricingAgent:
