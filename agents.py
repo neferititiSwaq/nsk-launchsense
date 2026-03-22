@@ -70,25 +70,34 @@ class PersonaAgent:
 class CompetitorAgent:
     def __init__(self, brand_name="NSKdevpreneur Hub"):
         self.brand = brand_name
-        # Use .get() to avoid crashing if the key is missing in Secrets
+        # Try to get the key from environment (local) or Streamlit Secrets (cloud)
         self.search_key = os.getenv("SERPER_API_KEY")
+
+        if not self.search_key:
+            print("⚠️ WARNING: SERPER_API_KEY not found in Environment/Secrets!")
 
     def search_market(self, query):
         """This function actually 'Googles' the product for real prices"""
         if not self.search_key:
-            return {"organic": []}  # Return empty if no key
+            print("❌ ABORTING SEARCH: No API Key available.")
+            return {"organic": []}
 
         url = "https://google.serper.dev/search"
+        # We add 'South Africa' to the query to ensure local results
         payload = json.dumps({"q": f"{query} price South Africa"})
         headers = {
-            'X-API-KEY': self.search_key,
+            # Ensure no accidental spaces
+            'X-API-KEY': str(self.search_key).strip(),
             'Content-Type': 'application/json'
         }
+
         try:
-            response = requests.request(
-                "POST", url, headers=headers, data=payload)
+            response = requests.post(
+                url, headers=headers, data=payload, timeout=10)
+            response.raise_for_status()  # This will catch 403 (Invalid Key) errors
             return response.json()
-        except:
+        except Exception as e:
+            print(f"❌ SERPER ERROR: {e}")
             return {"organic": []}
 
     def research_competitors(self, product_brief):
