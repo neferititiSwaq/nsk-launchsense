@@ -10,7 +10,7 @@ st.set_page_config(page_title="NSK LaunchSense", page_icon="🚀", layout="wide"
 st.title("🚀 NSKdevpreneur Hub: LaunchSense")
 st.markdown("---")
 
-# Initialize Session State (This keeps data visible after clicking buttons)
+# Initialize Session State
 if 'analysis_data' not in st.session_state:
     st.session_state.analysis_data = None
 if 'product_img' not in st.session_state:
@@ -25,7 +25,7 @@ target_margin = st.sidebar.slider("Target Profit Margin (%)", 10, 80, 40) / 100
 # 3. Main User Input
 product_brief = st.text_area(
     "What are we launching today?",
-    placeholder="e.g., Solar-powered backpack for hikers...",
+    placeholder="e.g., Solar-powered backpack for hikers in South Africa...",
     height=100
 )
 
@@ -33,28 +33,39 @@ product_brief = st.text_area(
 if st.button("🚀 Run Full Launch Analysis"):
     if product_brief:
         with st.spinner("NSK AI Agents are strategizing..."):
-            # Run Agents
+            # Initialize Agents
             p_agent = PersonaAgent()
             c_agent = CompetitorAgent()
             pr_agent = PricingAgent()
-            i_agent = ImageAgent()
 
-            # Store results in Session State
+            # Layer 1: Personas
             raw_p = p_agent.create_personas(product_brief)
-            clean_p = raw_p.replace("```json", "").replace("```", "").strip()
 
-            st.session_state.analysis_data = {
-                "personas": json.loads(clean_p),
-                "competitors": c_agent.research_competitors(product_brief),
-                "pricing": pr_agent.calculate_strategy(cost_price, target_margin, product_brief)
-            }
-            # Generate Image
-            st.session_state.product_img = i_agent.generate_sketch(
-                product_brief)
+            # Layer 2: Competitors
+            comps = c_agent.research_competitors(product_brief)
+
+            # Layer 3: Pricing
+            price_strat = pr_agent.calculate_strategy(
+                cost_price, target_margin, product_brief)
+
+            # Store results in Session State with error handling for JSON
+            try:
+                st.session_state.analysis_data = {
+                    "personas": json.loads(raw_p),
+                    "competitors": comps,
+                    "pricing": price_strat,
+                    "brief": product_brief
+                }
+                # Reset image for new analysis
+                st.session_state.product_img = None
+            except Exception as e:
+                st.error(
+                    "AI returned a complex format. Please try running the analysis again.")
+                st.expander("Debug Details").write(raw_p)
     else:
         st.warning("Please describe your product first.")
 
-# 5. Display Results (If they exist in session state)
+# 5. Display Results
 if st.session_state.analysis_data:
     data = st.session_state.analysis_data
 
@@ -63,22 +74,19 @@ if st.session_state.analysis_data:
 
     with col_img:
         st.subheader("🖼️ Visual Concept")
-        # We only show the button if the image hasn't been generated yet
         if st.session_state.product_img is None:
             if st.button("🎨 Generate AI Concept Sketch"):
-                img_agent = ImageAgent()
-                with st.spinner("Nano Banana 2 is drawing... (This takes 10s)"):
-                    result = img_agent.generate_sketch(product_brief)
+                i_agent = ImageAgent()
+                with st.spinner("Nano Banana 2 is sketching..."):
+                    result = i_agent.generate_sketch(data["brief"])
                     if result:
                         st.session_state.product_img = result
                         st.rerun()
                     else:
-                        st.error(
-                            "Wait 60 seconds! Google's Free Tier is cooling down.")
+                        st.error("Wait 60 seconds! Quota cooling down.")
         else:
-            # If we have the image, show it!
             st.image(st.session_state.product_img, use_container_width=True)
-            if st.button("🗑️ Clear & Redraw"):
+            if st.button("🗑️ Reset Image"):
                 st.session_state.product_img = None
                 st.rerun()
 
@@ -106,50 +114,40 @@ if st.session_state.analysis_data:
     if st.button("📄 Generate Executive Report"):
         pdf = FPDF()
         pdf.add_page()
-
-        # Title
         pdf.set_font("Arial", 'B', 20)
         pdf.cell(200, 20, txt="NSK LaunchSense: Strategic Report",
                  ln=True, align='C')
 
-        # Financial Summary
+        # Financials
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="1. Financial Summary", ln=True)
         pdf.set_font("Arial", '', 12)
-        pdf.cell(200, 10, txt=f"Product: {product_brief}", ln=True)
+        pdf.multi_cell(0, 10, txt=f"Product: {data['brief']}")
         pdf.cell(
-            200, 10, txt=f"Unit Cost: R{cost_price} | Target Price: R{strat['suggested_price']}", ln=True)
-        pdf.ln(5)
+            200, 10, txt=f"Unit Cost: R{cost_price} | Retail: R{strat['suggested_price']}", ln=True)
 
-        # Personas Section with Safety Net
+        # Personas
+        pdf.ln(5)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="2. Target Personas", ln=True)
         pdf.set_font("Arial", '', 10)
+        for p in data["personas"]:
+            name = p.get('name', 'Valued Customer')
+            quote = p.get('quote', p.get('goals', 'Ready for adventure'))
+            pdf.multi_cell(0, 10, txt=f"- {name}: {quote[:100]}...")
 
-        for p in data.get("personas", []):
-            # .get("key", "fallback") prevents the KeyError!
-            name = p.get('name', 'Strategic Persona')
-            occ = p.get('occupation', 'Target Audience')
-            # Look for 'quote' or 'focus' as fallbacks
-            focus = p.get('quote', p.get('focus', 'Ready for adventure!'))
-
-            pdf.multi_cell(
-                0, 10, txt=f"- {name}: {occ} (Focus: {focus[:60]}...)")
-
+        # Competitors
         pdf.ln(5)
-
-        # Competitor Section
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(200, 10, txt="3. Competitor Landscape", ln=True)
         pdf.set_font("Arial", '', 10)
         for c in data["competitors"]:
             pdf.cell(0, 10, txt=f"- {c['name']} ({c['price_range']})", ln=True)
 
-        # Save and Download
         pdf_output = pdf.output(dest='S').encode('latin-1', 'ignore')
         st.download_button(
             label="📥 Download Professional PDF",
             data=pdf_output,
-            file_name="NSK_Full_Launch_Report.pdf",
+            file_name="NSK_Launch_Report.pdf",
             mime="application/pdf"
         )
